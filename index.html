@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RAT admin</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font: 15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif; margin: 0; background: #f6f6f8; color: #111; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 22px 18px 60px; }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  .sub { color: #777; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center; }
+  .card { background:#fff; border-radius:14px; padding:18px; margin-bottom:18px; box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 6px 20px rgba(0,0,0,.04); }
+  h2 { margin: 0 0 12px; font-size: 18px; }
+  label { display:block; margin:10px 0 4px; font-weight:600; font-size:13px; color:#444; }
+  input, textarea, select { width:100%; padding:9px; font:inherit; border:1px solid #ccc; border-radius:8px; background:#fff; }
+  textarea { min-height: 66px; resize: vertical; }
+  button { font:inherit; padding:8px 14px; border:0; border-radius:9px; background:#111; color:#fff; cursor:pointer; }
+  button.ghost { background:#eee; color:#111; }
+  button.danger { background:#c33; }
+  button:disabled { opacity:.4; cursor:default; }
+  .row { display:flex; gap:10px; align-items:center; margin-top:12px; flex-wrap: wrap; }
+  .prod { display:grid; grid-template-columns: 84px 1fr auto; gap:14px; align-items:center; padding:12px 0; border-bottom:1px solid #eee; }
+  .prod:last-child { border-bottom:0; }
+  .prod img, .prod .noimg { width:84px; height:84px; object-fit:cover; border-radius:10px; background:#eee; }
+  .prod b { font-size:15px; }
+  .meta { color:#666; font-size:13px; margin-top:3px; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  .pill.live { background:#d5f5d5; color:#0a5a0a; }
+  .pill.hidden { background:#eee; color:#666; }
+  .pill.new { background:#111; color:#fff; }
+  .pill.printing { background:#ffe7a8; color:#7a5300; }
+  .pill.done { background:#d5f5d5; color:#0a5a0a; }
+  #cropWrap { position:fixed; inset:0; background:rgba(0,0,0,.85); display:none; align-items:center; justify-content:center; flex-direction:column; gap:14px; z-index:100; }
+  #cropCanvas { max-width:80vmin; max-height:80vmin; border-radius:12px; cursor: grab; background:#222; }
+  #cropCanvas:active { cursor: grabbing; }
+  #login { max-width: 360px; margin: 80px auto; }
+  #app { display: none; }
+  .hint { font-size:12px; color:#888; margin-top:6px; }
+  .empty { color:#999; padding:20px 0; text-align:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="login" class="card">
+    <h1>RAT admin</h1>
+    <div class="sub">Enter your admin password</div>
+    <input id="pw" type="password" placeholder="password" autocomplete="current-password">
+    <div class="row">
+      <button onclick="login()" style="flex:1">Sign in</button>
+    </div>
+    <div id="loginErr" class="hint" style="color:#c33"></div>
+  </div>
+
+  <div id="app">
+    <h1>Random Ahh Things</h1>
+    <div class="sub">
+      <span>Admin</span>
+      <button class="ghost" onclick="logout()">Sign out</button>
+    </div>
+
+    <div class="card">
+      <h2>Add product</h2>
+      <label>Name</label><input id="pName">
+      <label>Description</label><textarea id="pDesc"></textarea>
+      <label>Price (pence — e.g. 250 = £2.50)</label><input id="pPrice" type="number" min="0" placeholder="250">
+      <label>Photo (centre-cropped to square)</label><input id="pImg" type="file" accept="image/*">
+      <div class="row">
+        <button onclick="saveProduct()">Save product</button>
+        <span id="pPreview" class="hint">No image</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Products</h2>
+      <div id="prodList" class="empty">loading…</div>
+    </div>
+
+    <div class="card">
+      <h2>Orders</h2>
+      <div id="orderList" class="empty">loading…</div>
+    </div>
+  </div>
+</div>
+
+<div id="cropWrap">
+  <div style="color:#fff;font-size:14px">Drag to move · scroll to zoom</div>
+  <canvas id="cropCanvas"></canvas>
+  <div class="row">
+    <button onclick="confirmCrop()">Crop &amp; use</button>
+    <button class="ghost" onclick="cancelCrop()">Cancel</button>
+  </div>
+</div>
+
+<script>
+// ⚠️ EDIT THIS to the SAME zrok URL as the shop:
+const API = 'https://randomahhthings.share.zrok.io';
+
+const KEY = 'rat_admin_pw';
+const money = p => '£' + (p/100).toFixed(2);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pw = () => localStorage.getItem(KEY) || '';
+const authH = () => ({ authorization: 'Bearer ' + pw() });
+const jsonH = () => ({ ...authH(), 'content-type': 'application/json' });
+
+async function login() {
+  const p = document.getElementById('pw').value;
+  if (!p) return;
+  try {
+    const r = await fetch(API + '/admin/products', { headers: { authorization: 'Bearer ' + p } });
+    if (!r.ok) throw new Error('wrong password');
+    localStorage.setItem(KEY, p);
+    showApp();
+  } catch (e) {
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+function logout() { localStorage.removeItem(KEY); location.reload(); }
+function showApp() {
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  loadProducts();
+  loadOrders();
+}
+async function tryAutoLogin() {
+  if (!pw()) return;
+  try {
+    const r = await fetch(API + '/admin/products', { headers: authH() });
+    if (r.ok) showApp(); else localStorage.removeItem(KEY);
+  } catch {}
+}
+
+// ---------- crop ----------
+let cropImg=null, cropScale=1, cropX=0, cropY=0, cropDone=null;
+const cv = document.getElementById('cropCanvas'), ctx = cv.getContext('2d');
+
+document.getElementById('pImg').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const img = new Image();
+  img.onload = () => {
+    cropImg = img; cropScale = 1; cropX = 0; cropY = 0;
+    cv.width = cv.height = Math.min(640, Math.min(window.innerWidth, window.innerHeight) * 0.7);
+    document.getElementById('cropWrap').style.display = 'flex';
+    drawCrop();
+  };
+  img.src = URL.createObjectURL(f);
+});
+function drawCrop() {
+  const s = cv.width;
+  const base = Math.max(s / cropImg.width, s / cropImg.height);
+  const w = cropImg.width * base * cropScale, h = cropImg.height * base * cropScale;
+  ctx.fillStyle = '#000'; ctx.fillRect(0,0,s,s);
+  ctx.drawImage(cropImg, (s-w)/2 + cropX, (s-h)/2 + cropY, w, h);
+}
+let dragging=false, last=null;
+cv.addEventListener('mousedown', e => { dragging=true; last=[e.clientX,e.clientY]; });
+window.addEventListener('mouseup', () => dragging=false);
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  cropX += e.clientX - last[0]; cropY += e.clientY - last[1];
+  last=[e.clientX,e.clientY]; drawCrop();
+});
+cv.addEventListener('wheel', e => { e.preventDefault(); cropScale = Math.max(1, cropScale * (e.deltaY<0?1.1:0.9)); drawCrop(); }, { passive:false });
+
+function confirmCrop() {
+  const out = document.createElement('canvas');
+  out.width = out.height = 800;
+  const octx = out.getContext('2d');
+  const s = cv.width;
+  const base = Math.max(s / cropImg.width, s / cropImg.height);
+  const w = cropImg.width * base * cropScale, h = cropImg.height * base * cropScale;
+  const dx = (s-w)/2 + cropX, dy = (s-h)/2 + cropY;
+  const k = 800 / s;
+  octx.drawImage(cropImg, dx*k, dy*k, w*k, h*k);
+  cropDone = out.toDataURL('image/webp', 0.85);
+  document.getElementById('pPreview').textContent = 'Image ready ✓';
+  cancelCrop(true);
+}
+function cancelCrop(keep) {
+  document.getElementById('cropWrap').style.display = 'none';
+  if (!keep) { cropDone = null; document.getElementById('pPreview').textContent = 'No image'; }
+  document.getElementById('pImg').value = '';
+}
+
+// ---------- products ----------
+async function loadProducts() {
+  const r = await fetch(API + '/admin/products', { headers: authH() });
+  if (!r.ok) return logout();
+  const list = await r.json();
+  document.getElementById('prodList').innerHTML = list.map(p => `
+    <div class="prod">
+      ${p.imageUrl ? `<img src="${API}${p.imageUrl}">` : '<div class="noimg"></div>'}
+      <div>
+        <b>${esc(p.name)}</b> <span class="pill ${p.active?'live':'hidden'}">${p.active?'live':'hidden'}</span>
+        <div class="meta">${money(p.price)}${p.description ? ' · ' + esc(p.description) : ''}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="ghost" onclick="toggleActive('${p.id}',${!p.active})">${p.active?'Hide':'Show'}</button>
+        <button class="danger" onclick="delProduct('${p.id}')">Delete</button>
+      </div>
+    </div>`).join('') || '<div class="empty">No products yet.</div>';
+}
+
+async function saveProduct() {
+  const name = document.getElementById('pName').value.trim();
+  const description = document.getElementById('pDesc').value.trim();
+  const price = parseInt(document.getElementById('pPrice').value, 10);
+  if (!name) return alert('Name required');
+  if (!Number.isFinite(price) || price < 0) return alert('Price required (in pence)');
+  const body = { name, description, price };
+  if (cropDone) body.imageData = cropDone;
+
+  const r = await fetch(API + '/admin/products', { method:'POST', headers: jsonH(), body: JSON.stringify(body) });
+  if (!r.ok) return alert('Failed: ' + r.status);
+  ['pName','pDesc','pPrice'].forEach(id => document.getElementById(id).value = '');
+  cropDone = null;
+  document.getElementById('pPreview').textContent = 'No image';
+  loadProducts();
+}
+
+async function toggleActive(id, active) {
+  await fetch(API + '/admin/products/' + id, { method:'PATCH', headers: jsonH(), body: JSON.stringify({ active }) });
+  loadProducts();
+}
+async function delProduct(id) {
+  if (!confirm('Delete this product?')) return;
+  await fetch(API + '/admin/products/' + id, { method:'DELETE', headers: authH() });
+  loadProducts();
+}
+
+// ---------- orders ----------
+async function loadOrders() {
+  const r = await fetch(API + '/admin/orders', { headers: authH() });
+  if (!r.ok) return;
+  const list = (await r.json()).reverse();
+  document.getElementById('orderList').innerHTML = list.map(o => `
+    <div class="prod" style="grid-template-columns:1fr auto">
+      <div>
+        <b>${esc(o.ref)}</b> <span class="pill ${o.status}">${esc(o.status)}</span>
+        <div class="meta">
+          ${esc(o.name)} · ${esc(o.date)} · ${esc(o.location)} · ${esc(o.payTime)}<br>
+          ${o.items.map(i => `${i.qty}× ${esc(i.name)}`).join(', ')} — <b>${money(o.total)}</b>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="ghost" onclick="setStatus('${o.id}','printing')">Printing</button>
+        <button class="ghost" onclick="setStatus('${o.id}','done')">Done</button>
+      </div>
+    </div>`).join('') || '<div class="empty">No orders yet.</div>';
+}
+async function setStatus(id, status) {
+  await fetch(API + '/admin/orders/' + id, { method:'PATCH', headers: jsonH(), body: JSON.stringify({ status }) });
+  loadOrders();
+}
+
+document.getElementById('pw').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+tryAutoLogin();
+</script>
+</body>
+</html>
