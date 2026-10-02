@@ -42,12 +42,10 @@
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.03), 0 6px 20px rgba(0,0,0,.03); }
   .card h2 { margin: 0 0 16px; font-size: 16px; }
 
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 18px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 18px; }
   .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.03); }
   .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
   .stat .value { font-size: 28px; font-weight: 700; margin-top: 6px; letter-spacing: -0.5px; }
-  .stat .value.money { color: var(--green); }
-  .stat .value.new { color: var(--accent); }
 
   label { display: block; margin: 12px 0 5px; font-weight: 600; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
   input, textarea, select { width: 100%; padding: 10px; font: inherit; background: #fff; color: var(--text); border: 1px solid var(--border); border-radius: 9px; }
@@ -76,7 +74,6 @@
   .pill.live { background: #e5f7ee; color: var(--green); }
   .pill.hidden { background: var(--panel2); color: var(--muted); }
   .pill.new { background: #e7ecff; color: var(--accent); }
-  .pill.printing { background: #fdf3d6; color: var(--yellow); }
   .pill.done { background: #e5f7ee; color: var(--green); }
   .pill.cancelled { background: #fbe4e4; color: var(--red); }
   .pill.out { background: #fbe4e4; color: var(--red); }
@@ -155,10 +152,10 @@
 
   <div class="page active" id="page-dash">
     <div class="stats">
-      <div class="stat"><div class="label">New orders</div><div class="value new" id="sNew">0</div></div>
-      <div class="stat"><div class="label">Printing</div><div class="value" id="sPrinting" style="color:var(--yellow)">0</div></div>
+      <div class="stat"><div class="label">New orders</div><div class="value" id="sNew" style="color:var(--accent)">0</div></div>
       <div class="stat"><div class="label">Done</div><div class="value" id="sDone" style="color:var(--green)">0</div></div>
-      <div class="stat"><div class="label">Revenue (done)</div><div class="value money" id="sRev">£0.00</div></div>
+      <div class="stat"><div class="label">Cancelled</div><div class="value" id="sCancelled" style="color:var(--red)">0</div></div>
+      <div class="stat"><div class="label">Revenue (done)</div><div class="value" id="sRev" style="color:var(--green)">£0.00</div></div>
       <div class="stat"><div class="label">Products live</div><div class="value" id="sProd">0</div></div>
     </div>
     <div class="card">
@@ -173,8 +170,8 @@
       <div class="filters">
         <button class="filter active" data-f="all" onclick="setFilter('all')">All <span class="n" id="fAll">0</span></button>
         <button class="filter" data-f="new" onclick="setFilter('new')">New <span class="n" id="fNew">0</span></button>
-        <button class="filter" data-f="printing" onclick="setFilter('printing')">Printing <span class="n" id="fPrinting">0</span></button>
         <button class="filter" data-f="done" onclick="setFilter('done')">Done <span class="n" id="fDone">0</span></button>
+        <button class="filter" data-f="cancelled" onclick="setFilter('cancelled')">Cancelled <span class="n" id="fCancelled">0</span></button>
       </div>
       <div id="orderList"><div class="empty">Loading…</div></div>
     </div>
@@ -250,6 +247,7 @@ let pollTimer = null;
 let audioCtx = null;
 let editingId = null;
 
+// ---------- auth ----------
 async function login() {
   const p = document.getElementById('pw').value;
   if (!p) return;
@@ -280,11 +278,13 @@ function boot() {
   document.addEventListener('click', primeAudio, { once: true });
 }
 
+// ---------- tabs ----------
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + name));
 }
 
+// ---------- data ----------
 async function refresh() {
   try {
     const [pr, or] = await Promise.all([
@@ -303,20 +303,21 @@ async function refresh() {
   } catch (e) { if (e === 'auth') logout(); }
 }
 
+// ---------- render ----------
 function render() {
-  const counts = { all: orders.length, new: 0, printing: 0, done: 0 };
+  const counts = { all: orders.length, new: 0, done: 0, cancelled: 0 };
   for (const o of orders) if (counts[o.status] !== undefined) counts[o.status]++;
 
   document.getElementById('sNew').textContent = counts.new;
-  document.getElementById('sPrinting').textContent = counts.printing;
   document.getElementById('sDone').textContent = counts.done;
+  document.getElementById('sCancelled').textContent = counts.cancelled;
   document.getElementById('sRev').textContent = money(orders.filter(o => o.status === 'done').reduce((s,o) => s + o.total, 0));
   document.getElementById('sProd').textContent = products.filter(p => p.active).length;
 
   document.getElementById('fAll').textContent = counts.all;
   document.getElementById('fNew').textContent = counts.new;
-  document.getElementById('fPrinting').textContent = counts.printing;
   document.getElementById('fDone').textContent = counts.done;
+  document.getElementById('fCancelled').textContent = counts.cancelled;
 
   const unread = orders.filter(o => !seenOrders.has(o.id) && o.status === 'new').length;
   const badge = document.getElementById('badge');
@@ -331,7 +332,7 @@ function render() {
 
 function renderUpcoming() {
   const upcoming = orders
-    .filter(o => o.status !== 'done' && o.status !== 'cancelled')
+    .filter(o => o.status === 'new')
     .sort((a,b) => a.date.localeCompare(b.date))
     .slice(0, 6);
   document.getElementById('upcoming').innerHTML = upcoming.length
@@ -359,9 +360,10 @@ function orderRow(o, compact) {
     </div>
     ${compact ? '' : `
     <div class="actions">
-      ${o.status === 'new' ? `<button class="ghost" onclick="setStatus('${o.id}','printing')">Printing</button>` : ''}
-      ${o.status !== 'done' ? `<button class="ghost" onclick="setStatus('${o.id}','done')">Done</button>` : ''}
+      ${o.status === 'new' ? `<button class="ghost" onclick="setStatus('${o.id}','done')">Mark done</button>` : ''}
+      ${o.status === 'new' ? `<button class="danger" onclick="setStatus('${o.id}','cancelled')">Cancel</button>` : ''}
       ${o.status === 'done' ? `<button class="ghost" onclick="setStatus('${o.id}','new')">Reopen</button>` : ''}
+      ${o.status === 'cancelled' ? `<button class="ghost" onclick="setStatus('${o.id}','new')">Restore</button>` : ''}
     </div>`}
   </div>`;
 }
@@ -413,6 +415,7 @@ function timeAgo(iso) {
   return Math.floor(s/86400) + 'd ago';
 }
 
+// ---------- notifications ----------
 function notify(o) {
   seenOrders.add(o.id);
   pushToast(`New order ${o.ref}`, `${o.name} · ${money(o.total)} · pickup ${o.date} ${o.payTime}`);
@@ -457,6 +460,7 @@ function openOrder(id) {
   render();
 }
 
+// ---------- actions ----------
 async function setStatus(id, status) {
   await fetch(API + '/admin/orders/' + id, { method:'PATCH', headers: jsonH(), body: JSON.stringify({ status }) });
   refresh();
@@ -575,7 +579,7 @@ function confirmCrop() {
 }
 function cancelCrop(keep) {
   document.getElementById('cropWrap').classList.remove('show');
-  if (!keep) { cropDone = null; }
+  if (!keep) cropDone = null;
   document.getElementById('pImg').value = '';
 }
 
